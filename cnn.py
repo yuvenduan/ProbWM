@@ -26,7 +26,7 @@ def taskonomy_transform(x):
     x = x * 2 - 1
     return x
 
-def get_cnn(cnn_archi, cnn_pret, cnn_layer='last', skip_last=True, pca_dim=16, **unused):
+def get_cnn(cnn_archi, cnn_pret, cnn_layer='last', skip_last=True, pca_dim=16, exp_names=None, **unused):
     """
     get the cnn model
     Args:
@@ -133,7 +133,9 @@ def get_cnn(cnn_archi, cnn_pret, cnn_layer='last', skip_last=True, pca_dim=16, *
         pca = PCA(n_components=pca_dim)
         full_embeddings = []
 
-        for exp_name in ['RedBlue', 'BlackWhite', 'ColoredSquares']:
+        if exp_names is None:
+            exp_names = ['RedBlue', 'BlackWhite', 'ColoredSquares']
+        for exp_name in exp_names:
             exp = displays.get_experiment(exp_name)
 
             imgs = []

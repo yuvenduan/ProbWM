@@ -19,6 +19,7 @@ def get_embedding(cnn, imgs) -> np.ndarray:
     if len(imgs.shape) == 3:
         imgs = imgs.unsqueeze(0)
     embedding = cnn(imgs.to(device))
+    embedding /= np.linalg.norm(embedding, axis=1, keepdims=True)
     if embedding.shape[0] == 1:
         embedding = embedding.squeeze(0)
     return embedding
@@ -85,7 +86,6 @@ def run(
             dist = ((sample_embedding - test_embedding) ** 2).sum() ** 0.5
             # dist = torch.nn.functional.cosine_similarity(torch.from_numpy(sample_embedding), torch.from_numpy(test_embedding), dim=0)
             dists.append(dist)
-
     if optimize:
         def loss(param):
             params = {}
@@ -97,17 +97,22 @@ def run(
         
         from scipy.optimize import minimize
         res = minimize(loss, [init_params['sigma'], init_params['change_prior']], method='L-BFGS-B', 
-               options={'gtol': 1e-6, 'ftol': 1e-6}, bounds=[(0.05, 20), (0.1, 0.9)])
+               options={'gtol': 1e-6, 'ftol': 1e-6}, bounds=[(0.001, 1), (0.1, 0.9)])
         assert res.success
 
         params = {}
         params['sigma'] = res.x[0]
         params['change_prior'] = res.x[1]
-        print(res.x)
+        print("found params", params)
+
     else:
         params = init_params
+    
+    save_dict = {}
+    save_dict['params'] = params
 
     predictions = get_predictions(params, embeddings)
+    save_dict['predictions'] = predictions
 
     save_path='figures/{}_{}'.format(exp_name, cnn_config['model_name'])
     if not os.path.exists(save_path):
@@ -115,8 +120,10 @@ def run(
 
     d_prime = plots.compare_behavior_vs_prediction(behaviors, predictions, save_path=save_path)
     plots.compare_behavior_vs_distance(behaviors[1::2], dists, save_path=save_path)
-
+    save_dict['d_prime'] = d_prime
     print(list(zip(range(24), d_prime[0], d_prime[1])))
+
+    np.save(os.path.join(save_path, 'save_dict.npy'), save_dict)
     return params
 
 def check_set_size_effect(
@@ -169,14 +176,37 @@ def check_set_size_effect(
         dist = dists[set_size * 200: (set_size + 1) * 200]
         avg_dists.append(np.mean(dist))
 
-    plots.compare_acc_vs_set_size(set_sizes, accs, 'Accuracy', save_path=save_path)
+    plots.compare_acc_vs_set_size(set_sizes, accs, 'Accuracy', save_path=save_path, ylim=[0.5, 1])
     plots.compare_acc_vs_set_size(set_sizes, hit_rates, 'Hit Rate', save_path=save_path)
     plots.compare_acc_vs_set_size(set_sizes, false_alarm_rates, 'False Alarm Rate', save_path=save_path)
     plots.compare_acc_vs_set_size(set_sizes, avg_dists, 'Distance', save_path=save_path)
 
-if __name__ == '__main__':
+    return accs
+
+# experiments
+
+def compare_layers():
     params = {
-        'sigma': 0.2,
+        'sigma': 0.02,
+        'change_prior': 0.5
+    }
+
+    cnn_config = {
+        'cnn_archi': 'ResNet-50',
+        'cnn_pret': 'Classification_ImageNet',
+        'pca_dim': 16,
+        'cnn_layer': 'last'
+    }
+
+    for exp in ['RedBlue', 'BlackWhite', 'ColoredSquares']:
+        for layer in ['last', 'layer1', 'layer2', 'layer3', 'layer4']:
+            cnn_config['cnn_layer'] = layer
+            cnn_config['model_name'] = '{}_{}_{}_{}'.format(cnn_config['cnn_archi'], cnn_config['cnn_layer'], cnn_config['pca_dim'], cnn_config['cnn_pret'][:5])
+            run(exp, params, cnn_config)
+
+def compare_pca_dim():
+    params = {
+        'sigma': 0.02,
         'change_prior': 0.5
     }
 
@@ -188,16 +218,65 @@ if __name__ == '__main__':
     }
 
     for exp in ['RedBlue', 'BlackWhite', 'ColoredSquares']:
-        for layer in ['layer1', 'layer2', 'layer3', 'layer4']:
-            cnn_config['cnn_layer'] = layer
+        for pca_dim in [4, 16, None]:
+            cnn_config['pca_dim'] = pca_dim
             cnn_config['model_name'] = '{}_{}_{}_{}'.format(cnn_config['cnn_archi'], cnn_config['cnn_layer'], cnn_config['pca_dim'], cnn_config['cnn_pret'][:5])
-            params = run(exp, params, cnn_config, optimize=False)
-    exit(0)
+            run(exp, params, cnn_config)
+
+def compare_sigma_setsize():
+    cnn_config = {
+        'cnn_archi': 'ResNet-18',
+        'cnn_pret': 'Classification_ImageNet',
+        'pca_dim': 16,
+        'cnn_layer': 'last'
+    }
 
     cnn_config['model_name'] = '{}_{}_{}_{}'.format(cnn_config['cnn_archi'], cnn_config['cnn_layer'], cnn_config['pca_dim'], cnn_config['cnn_pret'][:5])
-    for sigma in [0.2, 0.5, 1]:
+    accs = []
+
+    for sigma in [0.01, 0.02, 0.05, 0.1]:
         params = {
             'sigma': sigma,
             'change_prior': 0.5
         }
-        params = check_set_size_effect(params, cnn_config)
+        res = check_set_size_effect(params, cnn_config)
+        accs.append(res)
+
+    os.makedirs('figures/compare_sigma_setsize', exist_ok=True)
+    plots.compare_acc_vs_set_size(
+        [1, 2, 3, 4, 8, 12], accs, 'Accuracy', 
+        save_path='figures/compare_sigma_setsize', ylim=[0.5, 1],
+        labels=['0.01', '0.02', '0.05', '0.1']
+    )
+
+def compare_layer_setsize():
+    cnn_config = {
+        'cnn_archi': 'ResNet-50',
+        'cnn_pret': 'Classification_ImageNet',
+        'pca_dim': 16,
+        'cnn_layer': 'last'
+    }
+    params = {
+        'sigma': 0.05,
+        'change_prior': 0.5
+    }
+
+    accs = []
+    for layer in ['layer1', 'layer2', 'layer3', 'layer4', 'last']:
+        cnn_config['cnn_layer'] = layer
+        cnn_config['model_name'] = '{}_{}_{}_{}'.format(cnn_config['cnn_archi'], cnn_config['cnn_layer'], cnn_config['pca_dim'], cnn_config['cnn_pret'][:5])
+        res = check_set_size_effect(params, cnn_config)
+        accs.append(res)
+
+    os.makedirs('figures/compare_layer_setsize', exist_ok=True)
+    plots.compare_acc_vs_set_size(
+        [1, 2, 3, 4, 8, 12], accs, 'Accuracy', 
+        save_path='figures/compare_layer_setsize', ylim=[0.5, 1],
+        labels=['layer1', 'layer2', 'layer3', 'layer4', 'last']
+    )
+
+if __name__ == '__main__':
+    compare_layers()
+    # compare_pca_dim()
+    compare_sigma_setsize()
+    # compare_layer_setsize()

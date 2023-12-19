@@ -238,10 +238,22 @@ class ColoredSquares(ChangeDetection):
         return images
 
 if __name__ == '__main__':
-    exp = get_experiment('ColoredSquares_SetSize')
-    img = exp.feature_to_display(exp.get_trial(1122)['features'][0])
-    changed = exp.feature_to_display(exp.get_trial(1122)['features'][1])
-    imgs = exp.feature_to_changed_displays(exp.get_trial(1122)['features'][1])
+    exp = get_experiment('BlackWhite')
+    import matplotlib.pyplot as plt
+    for i in [29, 37]:
+        img = exp.feature_to_display(exp.get_trial(i)['features'][0])
+        changed = exp.feature_to_display(exp.get_trial(i)['features'][1])
+        
+        plt.imshow(img.permute(1, 2, 0))
+        plt.show()
+
+        plt.imshow(changed.permute(1, 2, 0))
+        plt.show()
+        plt.close()
+
+    exit(0)
+
+    imgs = exp.feature_to_changed_displays(exp.get_trial(1)['features'][1])
 
     import matplotlib.pyplot as plt
     plt.imshow(img.permute(1, 2, 0))
